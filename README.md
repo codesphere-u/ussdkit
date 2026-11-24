@@ -1,77 +1,97 @@
 # ussdkit
 
-**Stateful USSD & GSM session emulator, 3GPP TS 23.038 GSM-7/UCS-2 byte-budget guard, automated menu-tree crawler, and telco chaos testing suite.**
+[![CI](https://github.com/codesphere-u/ussdkit/actions/workflows/ci.yml/badge.svg)](https://github.com/codesphere-u/ussdkit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Zero Dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen.svg)](pyproject.toml)
 
-Zero runtime dependencies. Pure Python 3.11+. Built for fintech, mobile-money, agritech, health, and civic-tech engineers shipping `*123#` services across Africa, South Asia, and global GSM networks.
+**Stateful USSD & GSM session emulator, 3GPP TS 23.038 GSM-7/UCS-2 byte-budget guard, automated BFS menu-tree crawler, and telco chaos testing suite.**
 
-## Why `ussdkit` Exists
+- **Mission Domain:** Telecom & Mobile-Money Infrastructure
+- **Stack:** Pure Python 3.11+ (zero runtime third-party dependencies, `mypy --strict`, `ruff`, `pytest`)
+- **Maintainer:** Codesphere Innovations (U) Limited (`codesphere-u`)
 
-Millions of people rely on USSD (`*165#`, `*185#`, `*384#`) on feature phones and 2G/3G links where apps cannot reach. Yet USSD teams still test production menus manually on handsets or fragile curl scripts, leading to silent production failures:
+---
 
-- **The UCS-2 Truncation Cliff:** A single curly apostrophe (`’`), em-dash (`—`), or emoji switches a telco gateway from **GSM-7 (182/160 septets)** to **UCS-2 (80/70 UTF-16 units)**, silently chopping off menu options.
-- **Non-Idempotent Telco Retries:** 2G/3G aggregators frequently retry identical webhook callbacks—causing duplicate mobile-money debits if handlers are not idempotent per `(sessionId, text)`.
-- **Dead-End Screens & 180-Second Drop-offs:** Missing `CON`/`END` prefixes, overly deep menus, and unhandled malformed replies crash live sessions.
+## Problem Solved
 
-## Features
+Millions of subscribers rely on `*123#` USSD services across 2G/3G feature phones, yet engineering teams still test menus manually. A single curly apostrophe or emoji triggers the UCS-2 cliff (shrinking screen budgets from 182/160 septets to 80/70 UTF-16 units and silently truncating options), while 2G gateway retries trigger duplicate debits in non-idempotent handlers.
 
-- **Exact 3GPP TS 23.038 Encoding Guard:** Accounts for GSM-7 basic chars (1 septet), extension table chars (`€`, `[`, `]`, `{`, `}`, `^`, `~`, `\`, `|` = 2 septets), and UCS-2 surrogate pairs, with automatic GSM-7 sanitization suggestions.
-- **Multi-Gateway Codecs:** Africa's Talking, Hubtel, Infobip, and Generic JSON/text protocols.
-- **In-Process & Live HTTP Emulation:** Test Python callables directly in `pytest` or hit staging webhooks over HTTP/HTTPS with `*384*1*2#` fast-path dialing and deterministic 180s telco session timeout simulation.
-- **Automated BFS Menu-Tree Crawler:** Discovers reachable menus and flags overflows (`USSD-001`), hidden UCS-2 triggers (`USSD-002`), protocol violations (`USSD-003`), empty screens (`USSD-004`), excessive depth (`USSD-005`), cycles (`USSD-006`), and ambiguous dead-ends (`USSD-007`).
-- **Telco Chaos Runner:** Verifies duplicate-callback replay idempotency (`CHAOS-001`), session timeout enforcement (`CHAOS-002`), and 7 adversarial subscriber input payloads.
-- **CI-Ready Outputs:** Markdown, JSON, and **SARIF v2.1.0** for GitHub Code Scanning.
+## Key Features
+
+- Exact 3GPP TS 23.038 GSM-7 basic + 2-septet extension alphabet & UCS-2 surrogate-pair accounting with automated GSM-7 sanitization suggestions.
+- Multi-gateway webhook codecs for Africa's Talking (`CON`/`END`), Hubtel JSON, Infobip JSON, and Generic JSON/text.
+- Stateful `UssdSession` emulator supporting in-process Python callables and live HTTP/HTTPS webhooks, `*384*1*2#` fast-path dialing, and deterministic 180-second telco timeout enforcement.
+- Automated BFS `UssdTreeCrawler` auditing all reachable menus across 7 rules (`USSD-001`..`USSD-007`).
+- `UssdChaosRunner` verifying duplicate-callback idempotency (`CHAOS-001`), timeout enforcement (`CHAOS-002`), and 7 adversarial input classes.
+- Markdown, JSON, and SARIF v2.1.0 outputs for GitHub Code Scanning CI gates.
+
+## Architecture Overview
+
+```mermaid
+flowchart LR
+  A[USSD Handler / HTTP Webhook] --> B[gateways.py<br/>AT / Hubtel / Infobip]
+  B --> C[emulator.py<br/>UssdSession & 180s Clock]
+  C --> D[encoding.py<br/>GSM-7 / UCS-2 Guard]
+  C --> E[crawler.py<br/>BFS Menu Auditor]
+  C --> F[chaos.py<br/>Replay & Fuzz Suite]
+  E & F --> G[reporting.py<br/>JSON / Markdown / SARIF]
+```
+
+See [docs/architecture.md](docs/architecture.md) for module-level design details.
 
 ## Installation
 
 ```bash
-pip install ussdkit
-# or with uv
-uv pip install -e ".[dev]"
+git clone https://github.com/codesphere-u/ussdkit.git
+cd ussdkit
+uv sync --extra dev
+```
+
+Or install in editable mode with standard `pip`:
+
+```bash
+pip install -e ".[dev]"
 ```
 
 ## Quick Start (CLI)
 
 ```bash
-# 1. Inspect a USSD screen for GSM-7 / UCS-2 truncation hazards
-ussdkit check-text "Welcome to Farmer’s Wallet! 1. Balance 2. Send Money 3. Buy Airtime 4. Loans 5. Help" --strict-160
-
-# 2. Replay a scripted session against the built-in mobile-money demo handler
+ussdkit check-text "1. Balance\n2. Send Money" --strict-160
 ussdkit dial demo --inputs "2,0772000111,5000,1"
-
-# 3. Crawl every reachable screen and emit a Markdown or SARIF audit report
 ussdkit crawl demo --format markdown
-ussdkit crawl demo --format sarif > ussd-audit.sarif
-
-# 4. Run telco chaos & replay idempotency tests against a local or staging webhook
-ussdkit chaos http://localhost:8000/ussd --gateway africastalking
+ussdkit chaos demo --format json
 ```
 
-## Quick Start (Python / `pytest`)
+## Quick Start (Python API)
 
 ```python
-from ussdkit import CallableTransport, UssdChaosRunner, UssdRequest, UssdTreeCrawler
+from ussdkit import CallableTransport, UssdChaosRunner, UssdTreeCrawler
+from ussdkit.cli import demo_mobile_money_handler
 
-def my_ussd_handler(req: UssdRequest) -> str:
-    if not req.text:
-        return "CON Wallet\n1. Balance\n0. Exit"
-    if req.text == "1":
-        return "END Balance: UGX 120,000"
-    return "END Goodbye."
-
-transport = CallableTransport(my_ussd_handler)
+transport = CallableTransport(demo_mobile_money_handler)
 assert UssdTreeCrawler(transport).crawl().passed
 assert UssdChaosRunner(transport).run_all(happy_path=("1",)).passed
 ```
 
-## Development & Testing
+## Testing & Quality Gates
 
 ```bash
-uv sync --extra dev
-uv run pytest -v
-uv run ruff check src tests examples
+uv run ruff check src tests
 uv run mypy src
+uv run pytest -v
 ```
+
+## Security, Contributing & Roadmap
+
+- **Security:** See [SECURITY.md](SECURITY.md) for responsible disclosure procedures.
+- **Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- **Changelog & Roadmap:** See [CHANGELOG.md](CHANGELOG.md) and [ROADMAP.md](ROADMAP.md).
 
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+## Support & Contact
+
+Open an issue on [GitHub Issues](https://github.com/codesphere-u/ussdkit/issues) or contact `codesphereinnovationz@gmail.com`.
